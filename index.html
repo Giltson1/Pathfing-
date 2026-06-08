@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PathFindr — Algorithm Visualizer</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <header>
+        <div>
+            <div class="logo">Path<span>Findr</span></div>
+            <div class="tagline">Algorithm Visualizer</div>
+        </div>
+    </header>
+
+    <div class="layout">
+        <!-- SIDEBAR -->
+        <div class="sidebar">
+
+            <!-- ROUTE -->
+            <div class="section">
+                <div class="section-label">Route</div>
+                <div class="input-group">
+                    <div class="input-wrap">
+                        <div class="dot start"></div>
+                        <input type="text" id="startInput" placeholder="Start address or city..."
+                            value="Times Square, New York" />
+                    </div>
+                </div>
+                <div class="connector-line" style="margin-left:14px"></div>
+                <div class="input-group">
+                    <div class="input-wrap">
+                        <div class="dot end"></div>
+                        <input type="text" id="endInput" placeholder="Destination address..."
+                            value="Brooklyn Bridge, New York" />
+                    </div>
+                </div>
+            </div>
+
+            <!-- ALGORITHM -->
+            <div class="section">
+                <div class="section-label">Algorithm</div>
+                <div class="algo-grid">
+                    <div class="algo-btn active" data-algo="dijkstra" style="--current-color: var(--algo-dijkstra)"
+                        onclick="selectAlgo(this)">
+                        <span class="algo-name">Dijkstra's</span>
+                        <span class="algo-tag">Optimal · Weighted</span>
+                    </div>
+                    <div class="algo-btn" data-algo="astar" style="--current-color: var(--algo-astar)"
+                        onclick="selectAlgo(this)">
+                        <span class="algo-name">A* Search</span>
+                        <span class="algo-tag">Heuristic · Fast</span>
+                    </div>
+                    <div class="algo-btn" data-algo="bfs" style="--current-color: var(--algo-bfs)"
+                        onclick="selectAlgo(this)">
+                        <span class="algo-name">BFS</span>
+                        <span class="algo-tag">Unweighted · Optimal</span>
+                    </div>
+                    <div class="algo-btn" data-algo="dfs" style="--current-color: var(--algo-dfs)"
+                        onclick="selectAlgo(this)">
+                        <span class="algo-name">DFS</span>
+                        <span class="algo-tag">Unweighted · Not opt.</span>
+                    </div>
+                    <div class="algo-btn" data-algo="greedy" style="--current-color: var(--algo-greedy)"
+                        onclick="selectAlgo(this)" style="grid-column: span 2">
+                        <span class="algo-name">Greedy Best-First</span>
+                        <span class="algo-tag">Heuristic · Not opt.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RUN -->
+            <div class="section">
+                <button class="run-btn" id="runBtn" onclick="runPathfinding()">
+                    <span class="btn-text">▶ FIND PATH</span>
+                    <div class="spinner"></div>
+
+            <!-- STATS -->
+            <div class="section" id="statsSection" style="display:none">
+                <div class="section-label">Results</div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Distance</div>
+                        <div class="stat-value" id="statDist">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Duration</div>
+                        <div class="stat-value" id="statTime">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Nodes Visited</div>
+                        <div class="stat-value" id="statNodes">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Compute Time</div>
+                        <div class="stat-value" id="statCompute">—</div>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- MAP -->
+            <div id="map"></div>
+        </div>
+        <div class="toast" id="toast"></div>
+
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+        <script>
