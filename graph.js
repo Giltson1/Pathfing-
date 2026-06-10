@@ -8,3 +8,9 @@ fetch = ("https://api.geoapify.com/v1/geocode/autocomplete?text=query&limit=5&fo
   .then((result) => console.log(result))
   .catch((error) => console.error(error));
 
+// Entre key 
+document.getElementById("startInput").addEventListener('keydown', (e) =>
+{ if (e.key === "enter") runphfinding(); });
+
+document.getElementById("endInput").addEventListener('keydown', (e) =>
+{ if (e.key === "enter") runphfinding(); });
