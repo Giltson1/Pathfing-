@@ -1,16 +1,20 @@
-const requestOptyions = { 
-    method: "GET",
-    redirect:"follow"
-};
 
-fetch = ("https://api.geoapify.com/v1/geocode/autocomplete?text=query&limit=5&format=json&apiKey=YOUR_API_KEY", requestOptions)
-  .then((response) => response.text())
-  .then((result) => console.log(result))
-  .catch((error) => console.error(error));
+// selecting which algorithm to run 
+function selectAlgo(el) {
+    document.querySelectorAll(".algo-btn").forEach((b) => b.classList.remove("active"));
+    el.classList.add("active");
+    selectedAlgo = el.dataset.algo;
+}
 
-// Entre key 
-document.getElementById("startInput").addEventListener('keydown', (e) =>
-{ if (e.key === "enter") runphfinding(); });
-
-document.getElementById("endInput").addEventListener('keydown', (e) =>
-{ if (e.key === "enter") runphfinding(); });
+//MAP diplaye
+const map = L.map("map").setView([40.758, -73.9855], 13);
+ 
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: "©OpenStreetMap ©CartoDB",
+    maxZoom: 19,
+}).addTo(map);
+ 
+let routeLayer = null;
+let startMarker = null;
+let endMarker = null;
+let selectedAlgo = "dijkstra";
