@@ -189,6 +189,74 @@ function setLoading(on){
 
 // Function to run the pathfinding algorithm
 async function runPathfinding(){
+
+    // Get the start and end addresses from the input fields
+    const startaddress = document.getElementById("startInput").value.trim();
+    const endaddress = document.getElementById("endInput").value.trim();
+
+    if (!startaddress || !endaddress){
+        showToast("Please enter both start and end addresses.", true);
+        return;
+    }
     setLoading(true);
+
+    // Geocode the addresses to get coordinates
+    try{ 
+        const[startCoords, endCoords] = await Promise.all([
+            selectedCoords.start ? Promise.resolve(selectedCoords.start) : geocodeAddress(startaddress),
+            selectedCoords.end ? Promise.resolve(selectedCoords.end) : geocodeAddress(endaddress),
+        ]);
+
+        if (startMarker) map.removeLayer(startMarker);
+        if (endMarker) map.removeLayer(endMarker);
+
+        startMarker = L.marker([startCoords.lat, startCoords.lon]).addTo(map)
+            .bindPopup("Start: " + startaddress).bindPopup("Start");
+        endMarker = L.marker([endCoords.lat, endCoords.lon]).addTo(map)
+            .bindPopup("End: " + endaddress).bindPopup("End");
+        
+        map.fitBounds([
+            [startCoords.lat, startCoords.lon],
+            [endCoords.lat, endCoords.lon],
+
+        ]);
+         
+        const t0= performance.now();
+        const response = await fetch(`${FLASK_URL}/route`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ start: startCoords, end: endCoords, algo: selectedAlgo }),
+        });
+       
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || "Failed to fetch route");
+        }
+        const res = await response.json();
+        const computMS = (performance.now() - t0).toFixed(2);
+
+        if (routeLayer) map.removeLayer(routeLayer);
+        routeLayer = L.polyline(res.path,{
+            color: getAlgoColor(selectedAlgo),
+            weight: 5,
+            opacity: 0.7,
+        }).addTo(map);
+        document.getElementById("statsSection").style.display = "block";
+
+    }catch (error){
+        console.error("Error during pathfinding:", error);
+        showToast("Error: " + error.message, true);
+    } finally {
+        setLoading(false);
+    }
+}
+function getAlgoColor(algo) {
+    return {
+        dijkstra: "#00e5ff",
+        astar: "#7c4dff",
+        bfs: "#69f0ae",
+        dfs: "#ff6d00",
+        greedy: "#ff4081",
+    }[algo] || "#ffffff";
 }
 
