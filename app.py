@@ -17,7 +17,9 @@ def static_files(filename):
 
 @app.route("/api/config")
 def config():
-    return jsonify({"geoapify_key": os.getenv("API_KEY", "")})
+    api_key = os.getenv("API_KEY") or os.getenv("MY_AP_KEY") or ""
+    return jsonify({"geoapify_key": api_key})
 
 if __name__ == "__main__":
     app.run(debug=True)
+    

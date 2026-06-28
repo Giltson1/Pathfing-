@@ -1,4 +1,5 @@
 
+
 let API_KEY = null;
 
 async function init() {
@@ -27,12 +28,48 @@ function selectAlgo(el) {
     selectedAlgo = el.dataset.algo;
 }
 
-//MAP diplaye
+//MAP diplaye 
 const map = L.map("map").setView([40.758, -73.9855], 13);
-
+// default map layer 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
     attribution: "©OpenStreetMap ©CartoDB",
     maxZoom: 19,
+}).addTo(map);
+
+// switch betwen map layer 
+const voyager = L.tileLayer(
+  'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+  {
+    attribution: '"©OpenStreetMap ©CartoDB',
+    subdomains: 'abcd',
+    maxZoom: 20
+  }
+);
+
+const positron = L.tileLayer(
+  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+  {
+    attribution: '"©OpenStreetMap ©CartoDB',
+    subdomains: 'abcd',
+    maxZoom: 20
+  }
+);
+
+const darkMatter = L.tileLayer(
+  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+  {
+    attribution: '"©OpenStreetMap ©CartoDB',
+    subdomains: 'abcd',
+    maxZoom: 20
+  }
+);
+
+
+// Built-in Leaflet layer control
+L.control.layers({
+  'Voyager': voyager,
+  'Positron': positron,
+  'Dark Matter': darkMatter
 }).addTo(map);
 
 let routeLayer = null;
@@ -259,4 +296,6 @@ function getAlgoColor(algo) {
         greedy: "#ff4081",
     }[algo] || "#ffffff";
 }
+
+
 
