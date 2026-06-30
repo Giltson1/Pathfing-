@@ -20,6 +20,6 @@ def config():
     api_key = os.getenv("API_KEY") or os.getenv("MY_AP_KEY") or ""
     return jsonify({"geoapify_key": api_key})
 
-if __name__ == "__main__":
-    app.run(debug=True)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
     
