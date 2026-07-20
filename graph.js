@@ -77,37 +77,39 @@ let startMarker = null;
 let endMarker = null;
 let selectedAlgo = "dijkstra";
 
-// auto complete the address input fields
-
-const debounceTimers = {} // Store debounce timers for each input field
+const debounceTimers = {}; // Store debounce timers for each input field
 const selectedCoords = { start: null, end: null }; // Store selected coordinates for start and end inputs
+const autocompleteDropdowns = new Set();
+let autocompleteClickHandlerAdded = false;
+let toastTimeout = null;
 
 function attachAutocomplete(inputId, coordKey) {
     const input = document.getElementById(inputId);
 
-    // Create dropdown element
     const dropdown = document.createElement("ul");
     dropdown.className = "autocomplete-dropdown";
     dropdown.id = `${inputId}-dropdown`;
     input.parentElement.appendChild(dropdown);
+    autocompleteDropdowns.add(dropdown);
+
+    if (!autocompleteClickHandlerAdded) {
+        document.addEventListener("click", (e) => {
+            autocompleteDropdowns.forEach((menu) => {
+                if (!menu.contains(e.target) && !document.getElementById(menu.id.replace("-dropdown", ""))?.contains(e.target)) {
+                    menu.innerHTML = "";
+                    menu.style.display = "none";
+                }
+            });
+        });
+        autocompleteClickHandlerAdded = true;
+    }
 
     input.addEventListener("input", () => {
-        // Clear saved coords — user is typing something new
         selectedCoords[coordKey] = null;
-
         clearTimeout(debounceTimers[inputId]);
         debounceTimers[inputId] = setTimeout(() => fetchSuggestions(input, dropdown, coordKey), 300);
     });
 
-    // Close dropdown when clicking outside
-    document.addEventListener("click", (e) => {
-        if (!input.contains(e.target) && !dropdown.contains(e.target)) {
-            dropdown.innerHTML = "";
-            dropdown.style.display = "none";
-        }
-    });
-
-    // Keyboard nav inside dropdown
     input.addEventListener("keydown", (e) => {
         const items = dropdown.querySelectorAll("li");
         const active = dropdown.querySelector("li.highlighted");
@@ -130,7 +132,7 @@ function attachAutocomplete(inputId, coordKey) {
             }
         } else if (e.key === "Enter") {
             if (active) {
-                e.preventDefault(); // don't also trigger runPathfinding via Enter
+                e.preventDefault();
                 active.click();
             } else {
                 runPathfinding();
@@ -198,12 +200,15 @@ function renderDropdown(input, dropdown, coordKey, results) {
 
 async function geocodeAddress(address) {
     const url = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(address)}&format=json&apiKey=${API_KEY}`;
-    try{
+    try {
         const res = await fetch(url);
         const data = await res.json();
+        if (!data.results || data.results.length === 0) {
+            throw new Error("No geocoding results returned");
+        }
         return data.results[0];
-    } catch {
-        throw new Error("Failed to geocode address");
+    } catch (error) {
+        throw new Error(error.message || "Failed to geocode address");
     }
 }
 
@@ -248,18 +253,17 @@ async function runPathfinding(){
         if (endMarker) map.removeLayer(endMarker);
 
         startMarker = L.marker([startCoords.lat, startCoords.lon]).addTo(map)
-            .bindPopup("Start: " + startaddress).bindPopup("Start");
+            .bindPopup("Start: " + startaddress);
         endMarker = L.marker([endCoords.lat, endCoords.lon]).addTo(map)
-            .bindPopup("End: " + endaddress).bindPopup("End");
-        
+            .bindPopup("End: " + endaddress);
+
         map.fitBounds([
             [startCoords.lat, startCoords.lon],
             [endCoords.lat, endCoords.lon],
-
         ]);
          
-        const t0= performance.now();
-        const response = await fetch(`${FLASK_URL}/route`, {
+        const t0 = performance.now();
+        const response = await fetch("/route", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ start: startCoords, end: endCoords, algo: selectedAlgo }),
@@ -272,12 +276,21 @@ async function runPathfinding(){
         const res = await response.json();
         const computMS = (performance.now() - t0).toFixed(2);
 
+        if (!res.path || !Array.isArray(res.path) || res.path.length === 0) {
+            throw new Error("Invalid route returned by server");
+        }
+
         if (routeLayer) map.removeLayer(routeLayer);
-        routeLayer = L.polyline(res.path,{
+        routeLayer = L.polyline(res.path, {
             color: getAlgoColor(selectedAlgo),
             weight: 5,
             opacity: 0.7,
         }).addTo(map);
+
+        document.getElementById("statDist").textContent = formatDistance(res.distance);
+        document.getElementById("statTime").textContent = formatDuration(res.duration);
+        document.getElementById("statNodes").textContent = res.nodes_visited || res.path.length;
+        document.getElementById("statCompute").textContent = `${computMS} ms`;
         document.getElementById("statsSection").style.display = "block";
 
     }catch (error){
@@ -287,6 +300,39 @@ async function runPathfinding(){
         setLoading(false);
     }
 }
+function formatDistance(meters) {
+    if (typeof meters !== "number" || Number.isNaN(meters)) {
+        return "—";
+    }
+    if (meters >= 1000) {
+        return `${(meters / 1000).toFixed(2)} km`;
+    }
+    return `${Math.round(meters)} m`;
+}
+
+function formatDuration(seconds) {
+    if (typeof seconds !== "number" || Number.isNaN(seconds)) {
+        return "—";
+    }
+    if (seconds >= 3600) {
+        return `${(seconds / 3600).toFixed(1)} h`;
+    }
+    if (seconds >= 60) {
+        return `${Math.round(seconds / 60)} min`;
+    }
+    return `${Math.round(seconds)} s`;
+}
+
+function showToast(message, isError = false) {
+    const toast = document.getElementById("toast");
+    toast.textContent = message;
+    toast.className = `toast show ${isError ? "error" : "success"}`;
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => {
+        toast.className = "toast";
+    }, 3500);
+}
+
 function getAlgoColor(algo) {
     return {
         dijkstra: "#00e5ff",
