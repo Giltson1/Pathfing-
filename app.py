@@ -130,19 +130,19 @@ def route():
     end_node = nearest_node(coords, end_lat, end_lon)
 
     if algo == "dijkstra":
-        distance, node_path = dijkstra(graph, start_node, end_node)
+        distance, node_path, order = dijkstra(graph, start_node, end_node)
     elif algo == "bfs":
-        node_path = bfs(graph, start_node, end_node)
+        node_path, order = bfs(graph, start_node, end_node)
         distance = path_length(graph, node_path)
     elif algo == "dfs":
-        node_path = dfs(graph, start_node, end_node)
+        node_path, order = dfs(graph, start_node, end_node)
         distance = path_length(graph, node_path)
     elif algo == "astar":
         h = {n: haversine(*coords[n], end_lat, end_lon) for n in graph}
-        distance, node_path = a_star(graph, start_node, end_node, h)
+        distance, node_path, order = a_star(graph, start_node, end_node, h)
     elif algo == "greedy":
         h = {n: haversine(*coords[n], end_lat, end_lon) for n in graph}
-        node_path = greedy_best_first(graph, start_node, end_node, h)
+        node_path, order = greedy_best_first(graph, start_node, end_node, h)
         distance = path_length(graph, node_path)
     else:
         return jsonify(error=f"Unknown algorithm '{algo}'"), 400
@@ -156,11 +156,18 @@ def route():
     path_coords = [list(coords[n]) for n in node_path]
     duration = distance / 15000.0 * 3600.0  # assumes 15 km/h avg speed
 
+    exploration = [
+        [list(coords[parent]), list(coords[node])]
+        for node, parent in order
+        if parent is not None and parent in coords and node in coords
+    ]
+
     return jsonify({
         "path": path_coords,
         "distance": round(distance, 2),
         "duration": round(duration, 2),
         "nodes_visited": len(node_path),
+        "exploration": exploration,
     })
 
 
