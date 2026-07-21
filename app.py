@@ -12,6 +12,9 @@ load_dotenv(BASE_DIR / ".env")
 app = Flask(__name__)
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_HEADERS = {
+    "User-Agent": "PathFindr/1.0 (+https://example.com)"
+}
 
 
 @app.route("/")
@@ -51,7 +54,7 @@ def fetch_road_network(south, west, north, east):
     >;
     out skel qt;
     """
-    resp = requests.post(OVERPASS_URL, data={"data": query}, timeout=30)
+    resp = requests.post(OVERPASS_URL, data={"data": query}, headers=OVERPASS_HEADERS, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
