@@ -80,8 +80,8 @@ def build_graph(osm_data):
     return graph, coords
 
 
-def nearest_node(coords, lat, lon):
-    return min(coords.keys(), key=lambda n: haversine(lat, lon, *coords[n]))
+def nearest_node(graph, coords, lat, lon):
+    return min(graph.keys(), key=lambda n: haversine(lat, lon, *coords[n]))
 
 
 def path_length(graph, node_path):
@@ -126,8 +126,8 @@ def route():
     if not graph:
         return jsonify(error="No road network found in this area"), 404
 
-    start_node = nearest_node(coords, start_lat, start_lon)
-    end_node = nearest_node(coords, end_lat, end_lon)
+    start_node = nearest_node(graph, coords, start_lat, start_lon)
+    end_node = nearest_node(graph, coords, end_lat, end_lon)
 
     if algo == "dijkstra":
         distance, node_path, order = dijkstra(graph, start_node, end_node)
@@ -172,4 +172,4 @@ def route():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5001)

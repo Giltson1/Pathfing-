@@ -65,23 +65,33 @@ def bfs(graph, start, end):
     return path[::-1], order
 
 
-def dfs(graph, start, end, visited=None, parent=None, order=None):
-    if visited is None:
-        visited = set()
-    if order is None:
-        order = []
-    visited.add(start)
-    order.append((start, parent))
-    if start == end:
-        return [start], order
+def dfs(graph, start, end):
 
-    for neighbor in graph.get(start, []):
-        if neighbor not in visited:
-            subpath, order = dfs(graph, neighbor, end, visited, start, order)
-            if subpath:
-                return [start] + subpath, order
+    visited = {start}
+    prev = {start: None}
+    order = []
+    stack = [start]
 
-    return [], order
+    while stack:
+        node = stack.pop()
+        order.append((node, prev[node]))
+        if node == end:
+            break
+        for neighbor in reversed(list(graph.get(node, []))):
+            if neighbor not in visited:
+                visited.add(neighbor)
+                prev[neighbor] = node
+                stack.append(neighbor)
+
+    if end not in prev:
+        return [], order
+
+    path = []
+    cur = end
+    while cur is not None:
+        path.append(cur)
+        cur = prev[cur]
+    return path[::-1], order
 
 def a_star(graph, src, dst, h):
     g = {node: float('inf') for node in graph}
