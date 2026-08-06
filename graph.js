@@ -236,6 +236,11 @@ async function runPathfinding(){
     const startaddress = document.getElementById("startInput").value.trim();
     const endaddress = document.getElementById("endInput").value.trim();
 
+    // On small screens, switch to map-only view when user starts pathfinding
+    if (window.innerWidth <= 768) {
+        document.body.classList.add("mobile-map-only");
+    }
+
     if (!startaddress || !endaddress){
         showToast("Please enter both start and end addresses.", true);
         return;
@@ -330,6 +335,9 @@ function showToast(message, isError = false) {
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => {
         toast.className = "toast";
+        if (window.innerWidth <= 768) {
+            document.body.classList.remove("mobile-map-only");
+        }
     }, 3500);
 }
 

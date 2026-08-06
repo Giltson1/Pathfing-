@@ -5,7 +5,7 @@
   --border: #2a2a3d;
   --text: #e8e8f0;
   --muted: #5a5a7a;
-  --accent: #00ffcc;
+  --accent: #e8e8f0;
   --accent2: #7c6af7;
   --danger: #ff4d6d;
 
@@ -432,3 +432,27 @@
     color: var(--muted);
     text-align: right;
   }
+
+/* Mobile: when running pathfinding, show only the map */
+.mobile-map-only header,
+.mobile-map-only .sidebar,
+.mobile-map-only .toast {
+  display: none !important;
+}
+.mobile-map-only body {
+  overflow: hidden;
+}
+.mobile-map-only .layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+}
+.mobile-map-only #map {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  z-index: 1;
+}
