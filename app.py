@@ -11,25 +11,38 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 app = Flask(__name__)
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_URLS = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://overpass.osm.ch/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+]
 OVERPASS_HEADERS = {
-    "User-Agent": "PathFindr/1.0 (+https://example.com)"
+    "User-Agent": "PathFindr/1.0 (+https://example.com)",
+    "Accept": "application/json",
 }
+GEOAPIFY_ROUTING_URL = "https://api.geoapify.com/v1/routing"
+
+# Only these filenames are servable from BASE_DIR. Anything else (including
+# .env and the .py source files) is refused.
+ALLOWED_STATIC = {"graph.js", "style.css"}
 
 
 @app.route("/")
 def index():
-    return send_from_directory(".", "index.html")
+    return send_from_directory(str(BASE_DIR), "index.html")
 
 
 @app.route("/<path:filename>")
 def static_files(filename):
-    return send_from_directory(".", filename)
+    if filename not in ALLOWED_STATIC:
+        return "Not found", 404
+    return send_from_directory(str(BASE_DIR), filename)
 
 
 @app.route("/api/config")
 def config():
-    api_key = os.getenv("API_KEY") or os.getenv("MY_AP_KEY") or ""
+    api_key = os.getenv("API_KEY") or os.getenv("MY_API_KEY") or ""
     return jsonify({"geoapify_key": api_key})
 
 
@@ -44,19 +57,48 @@ def haversine(lat1, lon1, lat2, lon2):
 
 
 def fetch_road_network(south, west, north, east):
-    query = f"""
-    [out:json][timeout:25];
-    (
-      way["highway"]["highway"!~"footway|path|steps|cycleway|pedestrian|service|track"]
-        ({south},{west},{north},{east});
-    );
-    out body;
-    >;
-    out skel qt;
-    """
-    resp = requests.post(OVERPASS_URL, data={"data": query}, headers=OVERPASS_HEADERS, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+    queries = [
+        f"""
+        [out:json][timeout:25];
+        (
+            way["highway"!~"footway|path|steps|cycleway|pedestrian|track"]
+                ({south},{west},{north},{east});
+        );
+        out body;
+        >;
+        out skel qt;
+        """,
+        f"""
+        [out:json][timeout:25];
+        (
+            way["highway"]
+                ({south},{west},{north},{east});
+        );
+        out body;
+        >;
+        out skel qt;
+        """,
+    ]
+    errors = []
+    for query in queries:
+        for url in OVERPASS_URLS:
+            try:
+                resp = requests.post(url, data={"data": query}, headers=OVERPASS_HEADERS, timeout=30)
+                if resp.status_code == 406:
+                    errors.append(f"{url}: 406 Not Acceptable")
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("elements"):
+                    return data
+                errors.append(f"{url}: empty road graph for bbox ({south},{west},{north},{east})")
+            except requests.RequestException as e:
+                errors.append(f"{url}: {e}")
+                continue
+            except ValueError as e:
+                errors.append(f"{url}: invalid JSON response: {e}")
+                continue
+    raise requests.RequestException("All Overpass mirrors failed or returned no roads:\n" + "\n".join(errors))
 
 
 def build_graph(osm_data):
@@ -78,6 +120,52 @@ def build_graph(osm_data):
                 graph.setdefault(b, {})[a] = dist
 
     return graph, coords
+
+
+def fetch_geoapify_route(start_lat, start_lon, end_lat, end_lon):
+    api_key = os.getenv("API_KEY") or os.getenv("MY_API_KEY") or ""
+    if not api_key:
+        raise ValueError("Geoapify API key is missing")
+
+    params = {
+        "waypoints": f"{start_lat},{start_lon}|{end_lat},{end_lon}",
+        "mode": "drive",
+        "apiKey": api_key,
+    }
+
+    resp = requests.get(GEOAPIFY_ROUTING_URL, params=params, timeout=30)
+    resp.raise_for_status()
+    payload = resp.json()
+
+    features = payload.get("features") or []
+    if not features:
+        raise ValueError("Geoapify routing returned no features")
+
+    geometry = features[0].get("geometry", {})
+    coords = geometry.get("coordinates") or []
+    if not coords:
+        raise ValueError("Geoapify routing returned no geometry")
+
+    if geometry.get("type") == "MultiLineString":
+        flattened = []
+        for segment in coords:
+            for point in segment:
+                if len(point) >= 2:
+                    flattened.append([point[1], point[0]])
+        path_coords = flattened
+    else:
+        path_coords = []
+        for point in coords:
+            if len(point) >= 2:
+                path_coords.append([point[1], point[0]])
+
+    if not path_coords:
+        raise ValueError("Geoapify routing returned malformed geometry")
+
+    props = features[0].get("properties", {})
+    distance = float(props.get("distance", 0.0) or 0.0)
+    duration = float(props.get("time", 0.0) or 0.0)
+    return path_coords, distance, duration
 
 
 def nearest_node(graph, coords, lat, lon):
@@ -110,6 +198,20 @@ def route():
         end_lon = float(end["lon"])
     except (TypeError, ValueError, KeyError):
         return jsonify(error="Invalid start or end coordinates"), 400
+
+    api_key = os.getenv("API_KEY") or os.getenv("MY_API_KEY") or ""
+    if api_key:
+        try:
+            path_coords, distance, duration = fetch_geoapify_route(start_lat, start_lon, end_lat, end_lon)
+            return jsonify({
+                "path": path_coords,
+                "distance": round(distance, 2),
+                "duration": round(duration, 2),
+                "nodes_visited": len(path_coords),
+                "exploration": [],
+            })
+        except (requests.RequestException, ValueError):
+            pass
 
     margin = 0.02
     south = min(start_lat, end_lat) - margin
@@ -147,10 +249,7 @@ def route():
     else:
         return jsonify(error=f"Unknown algorithm '{algo}'"), 400
 
-    if not node_path:
-        return jsonify(error="No path found between these points"), 404
-
-    if distance in (float("inf"), None):
+    if not node_path or distance in (float("inf"), None):
         return jsonify(error="No path found between these points"), 404
 
     path_coords = [list(coords[n]) for n in node_path]

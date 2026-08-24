@@ -1,6 +1,19 @@
 import heapq
 from collections import deque
 
+
+def _reconstruct_path(prev, end):
+    if end is None or end not in prev:
+        return []
+
+    path = []
+    current = end
+    while current is not None:
+        path.append(current)
+        current = prev[current]
+    return path[::-1]
+
+
 def dijkstra(graph, start, end):
     pq = [(0, start)]
     distance = {node: float('inf') for node in graph}
@@ -29,12 +42,10 @@ def dijkstra(graph, start, end):
                 prev_node[neighbor] = current_node
                 heapq.heappush(pq, (new_dist, neighbor))
 
-    path = []
-    current = end
-    while current is not None:
-        path.append(current)
-        current = prev_node[current]
-    return distance[end], path[::-1], order
+    if distance.get(end, float('inf')) == float('inf'):
+        return float('inf'), [], order
+
+    return distance[end], _reconstruct_path(prev_node, end), order
 
 def bfs(graph, start, end):
     prev = {start: None}
@@ -56,13 +67,7 @@ def bfs(graph, start, end):
     if end not in prev:
         return [], order
 
-    path = []
-    cur = end 
-    
-    while cur is not None:
-        path.append(cur)
-        cur = prev[cur]
-    return path[::-1], order
+    return _reconstruct_path(prev, end), order
 
 
 def dfs(graph, start, end):
@@ -86,12 +91,7 @@ def dfs(graph, start, end):
     if end not in prev:
         return [], order
 
-    path = []
-    cur = end
-    while cur is not None:
-        path.append(cur)
-        cur = prev[cur]
-    return path[::-1], order
+    return _reconstruct_path(prev, end), order
 
 def a_star(graph, src, dst, h):
     g = {node: float('inf') for node in graph}
@@ -118,15 +118,10 @@ def a_star(graph, src, dst, h):
                 prev[neighbor] = node
                 heapq.heappush(pq, (new_g + h.get(neighbor, 0), neighbor))
 
-    if g[dst] == float('inf'):
+    if g.get(dst, float('inf')) == float('inf'):
         return float('inf'), [], order
 
-    path = []
-    cur = dst
-    while cur is not None:
-        path.append(cur)
-        cur = prev[cur]
-    return g[dst], path[::-1], order
+    return g[dst], _reconstruct_path(prev, dst), order
 
 def greedy_best_first(graph, start, end, h):
     pq = [(h.get(start, 0), start)]
@@ -148,12 +143,7 @@ def greedy_best_first(graph, start, end, h):
                     prev[neighbor] = node
                 heapq.heappush(pq, (h.get(neighbor, 0), neighbor))
 
-    if prev[end] is None and start != end:
+    if start != end and (end not in prev or prev[end] is None):
         return [], order
 
-    path = []
-    cur = end
-    while cur is not None:
-        path.append(cur)
-        cur = prev[cur]
-    return path[::-1], order
+    return _reconstruct_path(prev, end), order
