@@ -199,8 +199,10 @@ def route():
     except (TypeError, ValueError, KeyError):
         return jsonify(error="Invalid start or end coordinates"), 400
 
+    force_local = bool(data.get("force_local", False))
     api_key = os.getenv("API_KEY") or os.getenv("MY_API_KEY") or ""
-    if api_key:
+    # If an API key is available and user did not force local computation, try Geoapify first
+    if api_key and not force_local:
         try:
             path_coords, distance, duration = fetch_geoapify_route(start_lat, start_lon, end_lat, end_lon)
             return jsonify({
@@ -271,4 +273,4 @@ def route():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001)
+    app.run(host='0.0.0.0', port=5000, debug=True) 

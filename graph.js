@@ -268,10 +268,14 @@ async function runPathfinding(){
         ]);
          
         const t0 = performance.now();
+        // include UI options: force local graph and animation speed
+        const forceLocal = document.getElementById("forceLocal")?.checked || false;
+        const speedSetting = Number(document.getElementById("animationSpeed")?.value || 20);
+
         const response = await fetch("/route", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ start: startCoords, end: endCoords, algo: selectedAlgo }),
+            body: JSON.stringify({ start: startCoords, end: endCoords, algo: selectedAlgo, force_local: forceLocal }),
         });
        
         if (!response.ok) {
@@ -285,11 +289,73 @@ async function runPathfinding(){
             throw new Error("Invalid route returned by server");
         }
 
+        // If server provided an exploration trace, animate it first
+        if (explorationLayer) {
+            map.removeLayer(explorationLayer);
+            explorationLayer = null;
+        }
+
+        // clear previous exploration layers
+        if (explorationLayer) {
+            map.removeLayer(explorationLayer);
+            explorationLayer = null;
+        }
+        if (explorationNodesLayer) {
+            map.removeLayer(explorationNodesLayer);
+            explorationNodesLayer = null;
+        }
+
+        // create fresh layers for this run
+        explorationLayer = L.layerGroup().addTo(map);
+        explorationNodesLayer = L.layerGroup().addTo(map);
+
+        if (res.exploration && Array.isArray(res.exploration) && res.exploration.length > 0) {
+            // animate explored edges sequentially and show nodes
+            const speed = Math.max(1, Math.round(40 - speedSetting / 2)); // derived from slider (lower = faster)
+            for (let i = 0; i < res.exploration.length; i++) {
+                const [from, to] = res.exploration[i];
+                await new Promise((resolve) => setTimeout(resolve, speed));
+                L.polyline([from, to], {
+                    color: getAlgoColor(selectedAlgo),
+                    weight: 3,
+                    opacity: 0.25,
+                    dashArray: '4 6'
+                }).addTo(explorationLayer);
+                // show the explored node
+                L.circleMarker(to, {
+                    radius: 3,
+                    color: getAlgoColor(selectedAlgo),
+                    fillOpacity: 0.9,
+                    opacity: 0.9
+                }).addTo(explorationNodesLayer);
+            }
+        } else if (res.path && Array.isArray(res.path) && res.path.length > 1) {
+            // Fallback: animate the final path segments if no exploration data, and show path nodes
+            const speed = Math.max(1, Math.round(120 - speedSetting));
+            for (let i = 0; i < res.path.length - 1; i++) {
+                const from = res.path[i];
+                const to = res.path[i + 1];
+                await new Promise((resolve) => setTimeout(resolve, speed));
+                L.polyline([from, to], {
+                    color: getAlgoColor(selectedAlgo),
+                    weight: 3,
+                    opacity: 0.35,
+                    dashArray: '4 6'
+                }).addTo(explorationLayer);
+                L.circleMarker(to, {
+                    radius: 3,
+                    color: getAlgoColor(selectedAlgo),
+                    fillOpacity: 0.9,
+                    opacity: 0.9
+                }).addTo(explorationNodesLayer);
+            }
+        }
+
         if (routeLayer) map.removeLayer(routeLayer);
         routeLayer = L.polyline(res.path, {
             color: getAlgoColor(selectedAlgo),
             weight: 5,
-            opacity: 0.7,
+            opacity: 0.9,
         }).addTo(map);
 
         document.getElementById("statDist").textContent = formatDistance(res.distance);
