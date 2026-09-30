@@ -1,5 +1,3 @@
-
-
 let API_KEY = null;
 
 async function init() {
@@ -30,49 +28,34 @@ function selectAlgo(el) {
 
 //MAP diplaye 
 const map = L.map("map").setView([40.758, -73.9855], 13);
-// default map layer 
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    attribution: "©OpenStreetMap ©CartoDB",
-    maxZoom: 19,
-}).addTo(map);
+// Public tile layers that do not require a provider API key.
+const osmAttribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>';
+const openStreetMap = L.tileLayer(
+    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { attribution: osmAttribution, maxZoom: 19 }
+).addTo(map);
 
-// switch betwen map layer 
-const voyager = L.tileLayer(
-  'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-  {
-    attribution: '"©OpenStreetMap ©CartoDB',
-    subdomains: 'abcd',
-    maxZoom: 20
-  }
+const hot = L.tileLayer(
+    'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
+    { attribution: `${osmAttribution} | Tiles &copy; HOT`, subdomains: 'abc', maxZoom: 19 }
 );
 
-const positron = L.tileLayer(
-  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
-  {
-    attribution: '"©OpenStreetMap ©CartoDB',
-    subdomains: 'abcd',
-    maxZoom: 20
-  }
-);
-
-const darkMatter = L.tileLayer(
-  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-  {
-    attribution: '"©OpenStreetMap ©CartoDB',
-    subdomains: 'abcd',
-    maxZoom: 20
-  }
+const openTopoMap = L.tileLayer(
+    'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    { attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap (CC-BY-SA)', subdomains: 'abc', maxZoom: 17 }
 );
 
 
 // Built-in Leaflet layer control
 L.control.layers({
-  'Voyager': voyager,
-  'Positron': positron,
-  'Dark Matter': darkMatter
+    'OpenStreetMap': openStreetMap,
+    'Humanitarian': hot,
+    'Topographic': openTopoMap
 }).addTo(map);
 
 let routeLayer = null;
+let explorationLayer = null;
+let explorationNodesLayer = null;
 let startMarker = null;
 let endMarker = null;
 let selectedAlgo = "dijkstra";
@@ -193,7 +176,7 @@ function renderDropdown(input, dropdown, coordKey, results) {
     dropdown.style.display = "block";
 }
 
-// Geocode an address to coordinates using Geoapify to wait for the user 
+// Geocode an address to coordinates using Geoapify to wait for the user
 // to select an address from the autocomplete suggestions. 
 // If the user has already selected a suggestion, 
 // we can skip this step and use the saved coordinates.
@@ -223,6 +206,29 @@ async function reverseGeocode(lat, lon) {
         throw new Error("Failed to reverse geocode coordinates");
     }
 }
+function makeLiveAnimator(layer, nodeLayer, color, perFrame) {
+    const queue = [];
+    let head = 0, finished = false, resolveFn;
+    const done = new Promise((resolve) => (resolveFn = resolve));
+
+    function step() {
+        for (let k = 0; k < perFrame && head < queue.length; k++) {
+            const [from, to] = queue[head++];
+            L.polyline([from, to], { color, weight: 3, opacity: 0.25, dashArray: "4 6" }).addTo(layer);
+            L.circleMarker(to, { radius: 3, color, fillOpacity: 0.9, opacity: 0.9 }).addTo(nodeLayer);
+        }
+        if (head < queue.length || !finished) requestAnimationFrame(step);
+        else resolveFn();
+    }
+    requestAnimationFrame(step);
+
+    return {
+        push: (segs) => queue.push(...segs),
+        finish: () => (finished = true),
+        done,
+    };
+}
+
 function setLoading(on){
     const btn = document.getElementById("runBtn");
     btn.classList.toggle("loading", on);
@@ -272,84 +278,53 @@ async function runPathfinding(){
         const forceLocal = document.getElementById("forceLocal")?.checked || false;
         const speedSetting = Number(document.getElementById("animationSpeed")?.value || 20);
 
+        // fresh layers BEFORE the request so drawing starts immediately
+        if (explorationLayer) map.removeLayer(explorationLayer);
+        if (explorationNodesLayer) map.removeLayer(explorationNodesLayer);
+        if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+        explorationLayer = L.layerGroup().addTo(map);
+        explorationNodesLayer = L.layerGroup().addTo(map);
+
+        const color = getAlgoColor(selectedAlgo);
+        const edgesPerFrame = Math.max(1, Math.round(speedSetting));
+        const anim = makeLiveAnimator(explorationLayer, explorationNodesLayer, color, edgesPerFrame);
+
         const response = await fetch("/route", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ start: startCoords, end: endCoords, algo: selectedAlgo, force_local: forceLocal }),
         });
-       
+
         if (!response.ok) {
+            anim.finish();
             const errorData = await response.json();
             throw new Error(errorData.error || "Failed to fetch route");
         }
-        const res = await response.json();
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        let res = null;
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split("\n");
+            buf = lines.pop();
+            for (const line of lines) {
+                if (!line) continue;
+                const msg = JSON.parse(line);
+                if (msg.type === "edges") anim.push(msg.edges);
+                else if (msg.type === "result") res = msg;
+                else if (msg.type === "error") { anim.finish(); throw new Error(msg.error); }
+            }
+        }
+        anim.finish();
+        await anim.done;
+
+        if (!res) throw new Error("Invalid route returned by server");
         const computMS = (performance.now() - t0).toFixed(2);
-
-        if (!res.path || !Array.isArray(res.path) || res.path.length === 0) {
-            throw new Error("Invalid route returned by server");
-        }
-
-        // If server provided an exploration trace, animate it first
-        if (explorationLayer) {
-            map.removeLayer(explorationLayer);
-            explorationLayer = null;
-        }
-
-        // clear previous exploration layers
-        if (explorationLayer) {
-            map.removeLayer(explorationLayer);
-            explorationLayer = null;
-        }
-        if (explorationNodesLayer) {
-            map.removeLayer(explorationNodesLayer);
-            explorationNodesLayer = null;
-        }
-
-        // create fresh layers for this run
-        explorationLayer = L.layerGroup().addTo(map);
-        explorationNodesLayer = L.layerGroup().addTo(map);
-
-        if (res.exploration && Array.isArray(res.exploration) && res.exploration.length > 0) {
-            // animate explored edges sequentially and show nodes
-            const speed = Math.max(1, Math.round(40 - speedSetting / 2)); // derived from slider (lower = faster)
-            for (let i = 0; i < res.exploration.length; i++) {
-                const [from, to] = res.exploration[i];
-                await new Promise((resolve) => setTimeout(resolve, speed));
-                L.polyline([from, to], {
-                    color: getAlgoColor(selectedAlgo),
-                    weight: 3,
-                    opacity: 0.25,
-                    dashArray: '4 6'
-                }).addTo(explorationLayer);
-                // show the explored node
-                L.circleMarker(to, {
-                    radius: 3,
-                    color: getAlgoColor(selectedAlgo),
-                    fillOpacity: 0.9,
-                    opacity: 0.9
-                }).addTo(explorationNodesLayer);
-            }
-        } else if (res.path && Array.isArray(res.path) && res.path.length > 1) {
-            // Fallback: animate the final path segments if no exploration data, and show path nodes
-            const speed = Math.max(1, Math.round(120 - speedSetting));
-            for (let i = 0; i < res.path.length - 1; i++) {
-                const from = res.path[i];
-                const to = res.path[i + 1];
-                await new Promise((resolve) => setTimeout(resolve, speed));
-                L.polyline([from, to], {
-                    color: getAlgoColor(selectedAlgo),
-                    weight: 3,
-                    opacity: 0.35,
-                    dashArray: '4 6'
-                }).addTo(explorationLayer);
-                L.circleMarker(to, {
-                    radius: 3,
-                    color: getAlgoColor(selectedAlgo),
-                    fillOpacity: 0.9,
-                    opacity: 0.9
-                }).addTo(explorationNodesLayer);
-            }
-        }
 
         if (routeLayer) map.removeLayer(routeLayer);
         routeLayer = L.polyline(res.path, {
@@ -363,6 +338,11 @@ async function runPathfinding(){
         document.getElementById("statNodes").textContent = res.nodes_visited || res.path.length;
         document.getElementById("statCompute").textContent = `${computMS} ms`;
         document.getElementById("statsSection").style.display = "block";
+
+        // Successful run: restore the sidebar on mobile too, not just on error.
+        if (window.innerWidth <= 768) {
+            document.body.classList.remove("mobile-map-only");
+        }
 
     }catch (error){
         console.error("Error during pathfinding:", error);
@@ -416,6 +396,3 @@ function getAlgoColor(algo) {
         greedy: "#ff4081",
     }[algo] || "#ffffff";
 }
-
-
-
