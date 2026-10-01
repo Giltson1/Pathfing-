@@ -142,4 +142,3 @@ def greedy_best_first(graph, start, end, h):
         return []
 
     return _reconstruct_path(prev, end)
-    #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

@@ -233,6 +233,7 @@ function setLoading(on){
     const btn = document.getElementById("runBtn");
     btn.classList.toggle("loading", on);
     btn.disabled = on;
+    btn.querySelector(".btn-text").textContent = on ? "Working..." : "▶ FIND PATH";
 }
 
 // Function to run the pathfinding algorithm
@@ -276,7 +277,6 @@ async function runPathfinding(){
         const t0 = performance.now();
         // include UI options: force local graph and animation speed
         const forceLocal = document.getElementById("forceLocal")?.checked || false;
-        const speedSetting = Number(document.getElementById("animationSpeed")?.value || 20);
 
         // fresh layers BEFORE the request so drawing starts immediately
         if (explorationLayer) map.removeLayer(explorationLayer);
@@ -286,7 +286,7 @@ async function runPathfinding(){
         explorationNodesLayer = L.layerGroup().addTo(map);
 
         const color = getAlgoColor(selectedAlgo);
-        const edgesPerFrame = Math.max(1, Math.round(speedSetting));
+        const edgesPerFrame = 1;
         const anim = makeLiveAnimator(explorationLayer, explorationNodesLayer, color, edgesPerFrame);
 
         const response = await fetch("/route", {
@@ -305,6 +305,7 @@ async function runPathfinding(){
         const decoder = new TextDecoder();
         let buf = "";
         let res = null;
+        let hasStartedExploring = false;
 
         while (true) {
             const { value, done } = await reader.read();
@@ -315,7 +316,15 @@ async function runPathfinding(){
             for (const line of lines) {
                 if (!line) continue;
                 const msg = JSON.parse(line);
-                if (msg.type === "edges") anim.push(msg.edges);
+                if (msg.type === "status") {
+                    document.querySelector("#runBtn .btn-text").textContent = msg.msg;
+                } else if (msg.type === "edges") {
+                    if (!hasStartedExploring) {
+                        hasStartedExploring = true;
+                        document.querySelector("#runBtn .btn-text").textContent = "Exploring...";
+                    }
+                    anim.push(msg.edges);
+                }
                 else if (msg.type === "result") res = msg;
                 else if (msg.type === "error") { anim.finish(); throw new Error(msg.error); }
             }

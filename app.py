@@ -1,6 +1,8 @@
 import math
 import json
 import os
+import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 import requests
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
@@ -12,13 +14,20 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 app = Flask(__name__)
 
-OVERPASS_URLS = [
-    "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.private.coffee/api/interpreter",
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.openstreetmap.ru/api/interpreter",
-    "https://overpass.osm.jp/api/interpreter",
-]
+OVERPASS_URLS = list(dict.fromkeys(
+    url.strip()
+    for url in (
+        os.getenv("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
+        + ","
+        + os.getenv(
+            "OVERPASS_FALLBACK_URLS",
+            "https://overpass.kumi.systems/api/interpreter,"
+            "https://overpass.private.coffee/api/interpreter",
+        )
+    ).split(",")
+    if url.strip()
+))
+OVERPASS_REQUEST_TIMEOUT = (8, 45)
 OVERPASS_HEADERS = {
     "User-Agent": "PathFindr/1.0 (local pathfinding application)",
 }
@@ -57,18 +66,18 @@ def haversine(lat1, lon1, lat2, lon2):
 
 def fetch_road_network(south, west, north, east):
     query = (
-        f'[out:json][timeout:20];'
+        f'[out:json][timeout:35];'
         f'way["highway"]({south},{west},{north},{east});'
         "out body;>;out skel qt;"
     )
     errors = []
     for url in OVERPASS_URLS:
         try:
-            resp = requests.get(
+            resp = requests.post(
                 url,
-                params={"data": query},
+                data={"data": query},
                 headers=OVERPASS_HEADERS,
-                timeout=30,
+                timeout=OVERPASS_REQUEST_TIMEOUT,
             )
             resp.raise_for_status()
             data = resp.json()
@@ -79,7 +88,43 @@ def fetch_road_network(south, west, north, east):
             errors.append(f"{url}: {e}")
         except ValueError as e:
             errors.append(f"{url}: invalid JSON response: {e}")
-    raise requests.RequestException("All Overpass mirrors failed or returned no roads:\n" + "\n".join(errors))
+
+    if north - south <= 0.25 and east - west <= 0.25:
+        map_url = "https://api.openstreetmap.org/api/0.6/map"
+        try:
+            resp = requests.get(
+                map_url,
+                params={"bbox": f"{west},{south},{east},{north}"},
+                headers=OVERPASS_HEADERS,
+                timeout=OVERPASS_REQUEST_TIMEOUT,
+            )
+            resp.raise_for_status()
+            root = ET.fromstring(resp.content)
+            elements = [
+                {
+                    "type": "node",
+                    "id": int(node.attrib["id"]),
+                    "lat": float(node.attrib["lat"]),
+                    "lon": float(node.attrib["lon"]),
+                }
+                for node in root.findall("node")
+            ]
+            for way in root.findall("way"):
+                if any(tag.attrib.get("k") == "highway" for tag in way.findall("tag")):
+                    elements.append({
+                        "type": "way",
+                        "id": int(way.attrib["id"]),
+                        "nodes": [int(node.attrib["ref"]) for node in way.findall("nd")],
+                    })
+            if any(element["type"] == "way" for element in elements):
+                return {"elements": elements}
+            errors.append(f"{map_url}: no roads found for bbox ({south},{west},{north},{east})")
+        except (requests.RequestException, ET.ParseError, KeyError, ValueError) as e:
+            errors.append(f"{map_url}: {e}")
+    else:
+        errors.append("OpenStreetMap API fallback skipped: bounding box exceeds 0.25 degrees")
+
+    raise requests.RequestException("All road data sources failed or returned no roads:\n" + "\n".join(errors))
 
 
 def build_graph(osm_data):
@@ -177,7 +222,7 @@ def route():
             yield emit({"type": "error", "error": f"Unknown algorithm '{algo}'"})
             return
 
-        batch, visited_count, result = [], 0, None
+        visited_count, result = 0, None
         while True:
             try:
                 node, parent = next(gen)
@@ -186,12 +231,8 @@ def route():
                 break
             visited_count += 1
             if parent is not None:
-                batch.append([list(coords[parent]), list(coords[node])])
-            if len(batch) >= 25:
-                yield emit({"type": "edges", "edges": batch})
-                batch = []
-        if batch:
-            yield emit({"type": "edges", "edges": batch})
+                edge = [list(coords[parent]), list(coords[node])]
+                yield emit({"type": "edges", "edges": [edge]})
 
         if algo in ("dijkstra", "astar"):
             distance, node_path = result
@@ -215,4 +256,6 @@ def route():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000 
+    
+    app.run(host="0.0.0.0", port=port)
