@@ -2,6 +2,7 @@ import math
 import json
 import os
 import sys
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import requests
@@ -14,21 +15,10 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 app = Flask(__name__)
 
-OVERPASS_URLS = list(dict.fromkeys(
-    url.strip()
-    for url in (
-        os.getenv("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
-        + ","
-        + os.getenv(
-            "OVERPASS_FALLBACK_URLS",
-            "https://overpass.kumi.systems/api/interpreter,"
-            "https://overpass.private.coffee/api/interpreter",
-        )
-    ).split(",")
-    if url.strip()
-))
-OVERPASS_REQUEST_TIMEOUT = (8, 45)
-OVERPASS_HEADERS = {
+ROAD_REQUEST_TIMEOUT = (5, 20)
+GRAPH_CACHE_TTL = 1800
+_graph_cache = {}
+ROAD_REQUEST_HEADERS = {
     "User-Agent": "PathFindr/1.0 (local pathfinding application)",
 }
 # Only these filenames are servable from BASE_DIR. Anything else (including
@@ -64,67 +54,47 @@ def haversine(lat1, lon1, lat2, lon2):
     return 2 * r * math.asin(math.sqrt(a))
 
 
-def fetch_road_network(south, west, north, east):
-    query = (
-        f'[out:json][timeout:35];'
-        f'way["highway"]({south},{west},{north},{east});'
-        "out body;>;out skel qt;"
-    )
-    errors = []
-    for url in OVERPASS_URLS:
-        try:
-            resp = requests.post(
-                url,
-                data={"data": query},
-                headers=OVERPASS_HEADERS,
-                timeout=OVERPASS_REQUEST_TIMEOUT,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            if data.get("elements"):
-                return data
-            errors.append(f"{url}: empty road graph for bbox ({south},{west},{north},{east})")
-        except requests.RequestException as e:
-            errors.append(f"{url}: {e}")
-        except ValueError as e:
-            errors.append(f"{url}: invalid JSON response: {e}")
+def fetch_osm_map(south, west, north, east):
+    map_url = "https://api.openstreetmap.org/api/0.6/map"
+    if north - south > 0.25 or east - west > 0.25:
+        raise requests.RequestException(
+            "OpenStreetMap map API only supports bounding boxes up to 0.25 degrees"
+        )
 
-    if north - south <= 0.25 and east - west <= 0.25:
-        map_url = "https://api.openstreetmap.org/api/0.6/map"
-        try:
-            resp = requests.get(
-                map_url,
-                params={"bbox": f"{west},{south},{east},{north}"},
-                headers=OVERPASS_HEADERS,
-                timeout=OVERPASS_REQUEST_TIMEOUT,
-            )
-            resp.raise_for_status()
-            root = ET.fromstring(resp.content)
-            elements = [
-                {
-                    "type": "node",
-                    "id": int(node.attrib["id"]),
-                    "lat": float(node.attrib["lat"]),
-                    "lon": float(node.attrib["lon"]),
-                }
-                for node in root.findall("node")
-            ]
-            for way in root.findall("way"):
-                if any(tag.attrib.get("k") == "highway" for tag in way.findall("tag")):
-                    elements.append({
-                        "type": "way",
-                        "id": int(way.attrib["id"]),
-                        "nodes": [int(node.attrib["ref"]) for node in way.findall("nd")],
-                    })
-            if any(element["type"] == "way" for element in elements):
-                return {"elements": elements}
-            errors.append(f"{map_url}: no roads found for bbox ({south},{west},{north},{east})")
-        except (requests.RequestException, ET.ParseError, KeyError, ValueError) as e:
-            errors.append(f"{map_url}: {e}")
-    else:
-        errors.append("OpenStreetMap API fallback skipped: bounding box exceeds 0.25 degrees")
-
-    raise requests.RequestException("All road data sources failed or returned no roads:\n" + "\n".join(errors))
+    try:
+        resp = requests.get(
+            map_url,
+            params={"bbox": f"{west},{south},{east},{north}"},
+            headers=ROAD_REQUEST_HEADERS,
+            timeout=ROAD_REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+        elements = [
+            {
+                "type": "node",
+                "id": int(node.attrib["id"]),
+                "lat": float(node.attrib["lat"]),
+                "lon": float(node.attrib["lon"]),
+            }
+            for node in root.findall("node")
+        ]
+        for way in root.findall("way"):
+            if any(tag.attrib.get("k") == "highway" for tag in way.findall("tag")):
+                elements.append({
+                    "type": "way",
+                    "id": int(way.attrib["id"]),
+                    "nodes": [int(node.attrib["ref"]) for node in way.findall("nd")],
+                })
+        if any(element["type"] == "way" for element in elements):
+            return {"elements": elements}
+        raise requests.RequestException(
+            f"{map_url}: no roads found for bbox ({south},{west},{north},{east})"
+        )
+    except requests.RequestException:
+        raise
+    except (ET.ParseError, KeyError, ValueError) as e:
+        raise requests.RequestException(f"{map_url}: {e}") from e
 
 
 def build_graph(osm_data):
@@ -145,6 +115,24 @@ def build_graph(osm_data):
                 graph.setdefault(a, {})[b] = dist
                 graph.setdefault(b, {})[a] = dist
 
+    return graph, coords
+
+
+def get_graph(south, west, north, east):
+    # Snap outward to a 0.01-degree grid so nearby routes share a download.
+    south = math.floor(south * 100) / 100
+    west = math.floor(west * 100) / 100
+    north = math.ceil(north * 100) / 100
+    east = math.ceil(east * 100) / 100
+    key = (south, west, north, east)
+
+    cached = _graph_cache.get(key)
+    if cached and time.time() - cached[0] < GRAPH_CACHE_TTL:
+        return cached[1]
+
+    graph, coords = build_graph(fetch_osm_map(south, west, north, east))
+    if graph:
+        _graph_cache[key] = (time.time(), (graph, coords))
     return graph, coords
 
 
@@ -191,12 +179,11 @@ def route():
 
         yield emit({"type": "status", "msg": "Fetching roads..."})
         try:
-            osm_data = fetch_road_network(south, west, north, east)
+            graph, coords = get_graph(south, west, north, east)
         except requests.RequestException as e:
             yield emit({"type": "error", "error": f"Failed to fetch road network: {e}"})
             return
 
-        graph, coords = build_graph(osm_data)
         if not graph:
             yield emit({"type": "error", "error": "No road network found in this area"})
             return
@@ -247,8 +234,6 @@ def route():
         yield emit({
             "type": "result",
             "path": [list(coords[n]) for n in node_path],
-            "distance": round(distance, 2),
-            "duration": round(distance / 15000.0 * 3600.0, 2),
             "nodes_visited": visited_count,
         })
 

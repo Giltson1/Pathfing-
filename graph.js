@@ -212,7 +212,9 @@ function makeLiveAnimator(layer, nodeLayer, color, perFrame) {
     const done = new Promise((resolve) => (resolveFn = resolve));
 
     function step() {
-        for (let k = 0; k < perFrame && head < queue.length; k++) {
+        const backlog = queue.length - head;
+        const edgesThisFrame = Math.max(perFrame, Math.ceil(backlog / 90));
+        for (let k = 0; k < edgesThisFrame && head < queue.length; k++) {
             const [from, to] = queue[head++];
             L.polyline([from, to], { color, weight: 3, opacity: 0.25, dashArray: "4 6" }).addTo(layer);
             L.circleMarker(to, { radius: 3, color, fillOpacity: 0.9, opacity: 0.9 }).addTo(nodeLayer);
@@ -275,9 +277,6 @@ async function runPathfinding(){
         ]);
          
         const t0 = performance.now();
-        // include UI options: force local graph and animation speed
-        const forceLocal = document.getElementById("forceLocal")?.checked || false;
-
         // fresh layers BEFORE the request so drawing starts immediately
         if (explorationLayer) map.removeLayer(explorationLayer);
         if (explorationNodesLayer) map.removeLayer(explorationNodesLayer);
@@ -289,61 +288,61 @@ async function runPathfinding(){
         const edgesPerFrame = 1;
         const anim = makeLiveAnimator(explorationLayer, explorationNodesLayer, color, edgesPerFrame);
 
-        const response = await fetch("/route", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ start: startCoords, end: endCoords, algo: selectedAlgo, force_local: forceLocal }),
-        });
-
-        if (!response.ok) {
-            anim.finish();
-            const errorData = await response.json();
-            throw new Error(errorData.error || "Failed to fetch route");
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = "";
         let res = null;
-        let hasStartedExploring = false;
+        try {
+            const response = await fetch("/route", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ start: startCoords, end: endCoords, algo: selectedAlgo }),
+            });
 
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            const lines = buf.split("\n");
-            buf = lines.pop();
-            for (const line of lines) {
-                if (!line) continue;
-                const msg = JSON.parse(line);
-                if (msg.type === "status") {
-                    document.querySelector("#runBtn .btn-text").textContent = msg.msg;
-                } else if (msg.type === "edges") {
-                    if (!hasStartedExploring) {
-                        hasStartedExploring = true;
-                        document.querySelector("#runBtn .btn-text").textContent = "Exploring...";
-                    }
-                    anim.push(msg.edges);
-                }
-                else if (msg.type === "result") res = msg;
-                else if (msg.type === "error") { anim.finish(); throw new Error(msg.error); }
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || "Failed to fetch route");
             }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = "";
+            let hasStartedExploring = false;
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buf += decoder.decode(value, { stream: true });
+                const lines = buf.split("\n");
+                buf = lines.pop();
+                for (const line of lines) {
+                    if (!line) continue;
+                    const msg = JSON.parse(line);
+                    if (msg.type === "status") {
+                        document.querySelector("#runBtn .btn-text").textContent = msg.msg;
+                    } else if (msg.type === "edges") {
+                        if (!hasStartedExploring) {
+                            hasStartedExploring = true;
+                            document.querySelector("#runBtn .btn-text").textContent = "Exploring...";
+                        }
+                        anim.push(msg.edges);
+                    }
+                    else if (msg.type === "result") res = msg;
+                    else if (msg.type === "error") throw new Error(msg.error);
+                }
+            }
+        } finally {
+            anim.finish();
+            await anim.done;
         }
-        anim.finish();
-        await anim.done;
 
         if (!res) throw new Error("Invalid route returned by server");
         const computMS = (performance.now() - t0).toFixed(2);
 
         if (routeLayer) map.removeLayer(routeLayer);
         routeLayer = L.polyline(res.path, {
-            color: getAlgoColor(selectedAlgo),
+            color: "#000000",
             weight: 5,
             opacity: 0.9,
         }).addTo(map);
 
-        document.getElementById("statDist").textContent = formatDistance(res.distance);
-        document.getElementById("statTime").textContent = formatDuration(res.duration);
         document.getElementById("statNodes").textContent = res.nodes_visited || res.path.length;
         document.getElementById("statCompute").textContent = `${computMS} ms`;
         document.getElementById("statsSection").style.display = "block";
@@ -359,28 +358,6 @@ async function runPathfinding(){
     } finally {
         setLoading(false);
     }
-}
-function formatDistance(meters) {
-    if (typeof meters !== "number" || Number.isNaN(meters)) {
-        return "—";
-    }
-    if (meters >= 1000) {
-        return `${(meters / 1000).toFixed(2)} km`;
-    }
-    return `${Math.round(meters)} m`;
-}
-
-function formatDuration(seconds) {
-    if (typeof seconds !== "number" || Number.isNaN(seconds)) {
-        return "—";
-    }
-    if (seconds >= 3600) {
-        return `${(seconds / 3600).toFixed(1)} h`;
-    }
-    if (seconds >= 60) {
-        return `${Math.round(seconds / 60)} min`;
-    }
-    return `${Math.round(seconds)} s`;
 }
 
 function showToast(message, isError = false) {
