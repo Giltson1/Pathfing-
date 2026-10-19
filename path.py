@@ -6,6 +6,7 @@ def _reconstruct_path(prev, end):
     if end is None or end not in prev:
         return []
 
+    # Follow parent links from the destination, then reverse into travel order.
     path = []
     current = end
     while current is not None:
@@ -24,6 +25,7 @@ def dijkstra(graph, start, end):
     while pq:
         current_d, current_node = heapq.heappop(pq)
 
+        # A node can be queued more than once as shorter routes are found.
         if current_node in visited:
             continue
         visited.add(current_node)
@@ -39,6 +41,7 @@ def dijkstra(graph, start, end):
             if new_dist < distance[neighbor]:
                 distance[neighbor] = new_dist
                 prev_node[neighbor] = current_node
+                # Keep the old heap entry; the visited check skips it if stale.
                 heapq.heappush(pq, (new_dist, neighbor))
 
     if distance.get(end, float('inf')) == float('inf'):
@@ -58,6 +61,7 @@ def bfs(graph, start, end):
             break
         for neighbor in graph.get(node, []):
             if neighbor not in visited:
+                # Mark on enqueue so the same node cannot enter the queue twice.
                 visited.add(neighbor)
                 prev[neighbor] = node
                 que.append(neighbor)
@@ -79,6 +83,7 @@ def dfs(graph, start, end):
         yield node, prev[node]
         if node == end:
             break
+        # Reverse insertion makes the stack explore neighbors in graph order.
         for neighbor in reversed(list(graph.get(node, []))):
             if neighbor not in visited:
                 visited.add(neighbor)
@@ -91,6 +96,7 @@ def dfs(graph, start, end):
     return _reconstruct_path(prev, end)
 
 def a_star(graph, src, dst, h):
+    # g tracks traveled distance; the heap prioritizes g plus estimated distance.
     g = {node: float('inf') for node in graph}
     g[src] = 0
     pq = [(h.get(src, 0), src)]
@@ -120,6 +126,8 @@ def a_star(graph, src, dst, h):
     return g[dst], _reconstruct_path(prev, dst)
 
 def greedy_best_first(graph, start, end, h):
+    # Greedy search orders only by estimated distance; unlike A*, it ignores
+    # the distance already traveled, so it does not guarantee the shortest path.
     pq = [(h.get(start, 0), start)]
     prev = {node: None for node in graph}
     visited = set()
@@ -134,6 +142,7 @@ def greedy_best_first(graph, start, end, h):
             break
         for neighbor in graph.get(node, {}):
             if neighbor not in visited:
+                # Keep the first discovered parent to avoid rewriting the route.
                 if prev[neighbor] is None:
                     prev[neighbor] = node
                 heapq.heappush(pq, (h.get(neighbor, 0), neighbor))

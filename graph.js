@@ -88,7 +88,9 @@ function attachAutocomplete(inputId, coordKey) {
     }
 
     input.addEventListener("input", () => {
+        // Typed text invalidates any coordinates chosen from an earlier suggestion.
         selectedCoords[coordKey] = null;
+        // Wait until typing pauses before sending another autocomplete request.
         clearTimeout(debounceTimers[inputId]);
         debounceTimers[inputId] = setTimeout(() => fetchSuggestions(input, dropdown, coordKey), 300);
     });
@@ -104,6 +106,7 @@ function attachAutocomplete(inputId, coordKey) {
             } else {
                 const next = active.nextElementSibling;
                 active.classList.remove("highlighted");
+                // Wrap around so keyboard navigation can cycle through results.
                 (next || items[0]).classList.add("highlighted");
             }
         } else if (e.key === "ArrowUp") {
@@ -207,18 +210,21 @@ async function reverseGeocode(lat, lon) {
     }
 }
 function makeLiveAnimator(layer, nodeLayer, color, perFrame) {
+    // The server streams edges while the browser draws them over successive frames.
     const queue = [];
     let head = 0, finished = false, resolveFn;
     const done = new Promise((resolve) => (resolveFn = resolve));
 
     function step() {
         const backlog = queue.length - head;
+        // Increase the per-frame batch with the backlog to drain large queues quickly.
         const edgesThisFrame = Math.max(perFrame, Math.ceil(backlog / 90));
         for (let k = 0; k < edgesThisFrame && head < queue.length; k++) {
             const [from, to] = queue[head++];
             L.polyline([from, to], { color, weight: 3, opacity: 0.25, dashArray: "4 6" }).addTo(layer);
             L.circleMarker(to, { radius: 3, color, fillOpacity: 0.9, opacity: 0.9 }).addTo(nodeLayer);
         }
+        // Keep scheduling while work may still arrive or queued edges remain.
         if (head < queue.length || !finished) requestAnimationFrame(step);
         else resolveFn();
     }
@@ -309,6 +315,8 @@ async function runPathfinding(){
             while (true) {
                 const { value, done } = await reader.read();
                 if (done) break;
+                // Network chunks can end mid-message, so keep the last partial
+                // line in buf and parse it after the next chunk arrives.
                 buf += decoder.decode(value, { stream: true });
                 const lines = buf.split("\n");
                 buf = lines.pop();
@@ -329,6 +337,8 @@ async function runPathfinding(){
                 }
             }
         } finally {
+            // Stop accepting animation work and wait until queued edges are drawn,
+            // including when fetch or stream processing throws.
             anim.finish();
             await anim.done;
         }

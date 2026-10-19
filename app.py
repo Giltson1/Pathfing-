@@ -56,6 +56,7 @@ def haversine(lat1, lon1, lat2, lon2):
 
 def fetch_osm_map(south, west, north, east):
     map_url = "https://api.openstreetmap.org/api/0.6/map"
+    # The map endpoint rejects larger requests, so fail before making the call.
     if north - south > 0.25 or east - west > 0.25:
         raise requests.RequestException(
             "OpenStreetMap map API only supports bounding boxes up to 0.25 degrees"
@@ -70,6 +71,8 @@ def fetch_osm_map(south, west, north, east):
         )
         resp.raise_for_status()
         root = ET.fromstring(resp.content)
+        # Ways refer to nodes by ID; keep nodes and highway ways in the OSM
+        # shape expected by build_graph.
         elements = [
             {
                 "type": "node",
@@ -98,6 +101,7 @@ def fetch_osm_map(south, west, north, east):
 
 
 def build_graph(osm_data):
+    # Collect node coordinates first because ways contain node IDs, not positions.
     coords = {}
     for el in osm_data.get("elements", []):
         if el["type"] == "node":
@@ -119,7 +123,8 @@ def build_graph(osm_data):
 
 
 def get_graph(south, west, north, east):
-    # Snap outward to a 0.01-degree grid so nearby routes share a download.
+    # Snap outward so the cached download still covers the original route bounds.
+    # The 0.01-degree key also lets nearby routes reuse the same road graph.
     south = math.floor(south * 100) / 100
     west = math.floor(west * 100) / 100
     north = math.ceil(north * 100) / 100
@@ -193,6 +198,7 @@ def route():
 
         h = None
         if algo in ("astar", "greedy"):
+            # Estimate remaining distance from each road node to the destination.
             h = {n: haversine(coords[n][0], coords[n][1], end_lat, end_lon) for n in graph}
 
         if algo == "dijkstra":
@@ -212,6 +218,8 @@ def route():
         visited_count, result = 0, None
         while True:
             try:
+                # Algorithms yield exploration edges as they run and return the
+                # completed path through StopIteration.value.
                 node, parent = next(gen)
             except StopIteration as e:
                 result = e.value

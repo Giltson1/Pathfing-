@@ -433,7 +433,8 @@
     text-align: right;
   }
 
-/* Mobile: when running pathfinding, show only the map */
+/* graph.js toggles this body class during a mobile search to prioritize the map;
+   it removes the class again when the search succeeds or the toast expires. */
 .mobile-map-only header,
 .mobile-map-only .sidebar,
 .mobile-map-only .toast {
