@@ -23,7 +23,7 @@ ROAD_REQUEST_HEADERS = {
 }
 # Only these filenames are servable from BASE_DIR. Anything else (including
 # .env and the .py source files) is refused.
-ALLOWED_STATIC = {"graph.js", "style.css"}
+ALLOWED_STATIC = {"graph.js", "style.css", "map-icon.svg"}
 
 
 @app.route("/")
@@ -172,6 +172,16 @@ def route():
     except (TypeError, ValueError, KeyError):
         return jsonify(error="Invalid start or end coordinates"), 400
 
+    coordinates = (start_lat, start_lon, end_lat, end_lon)
+    if (
+        not all(math.isfinite(value) for value in coordinates)
+        or not -90 <= start_lat <= 90
+        or not -90 <= end_lat <= 90
+        or not -180 <= start_lon <= 180
+        or not -180 <= end_lon <= 180
+    ):
+        return jsonify(error="Coordinates must be within valid latitude and longitude ranges"), 400
+
     def emit(obj):
         return json.dumps(obj) + "\n"
 
@@ -198,8 +208,10 @@ def route():
 
         h = None
         if algo in ("astar", "greedy"):
-            # Estimate remaining distance from each road node to the destination.
-            h = {n: haversine(coords[n][0], coords[n][1], end_lat, end_lon) for n in graph}
+            # Estimate distance to the snapped destination node so A* remains
+            # admissible for the graph it is searching.
+            destination = coords[end_node]
+            h = {n: haversine(*coords[n], *destination) for n in graph}
 
         if algo == "dijkstra":
             gen = dijkstra(graph, start_node, end_node)

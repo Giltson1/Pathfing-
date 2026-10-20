@@ -251,14 +251,14 @@ async function runPathfinding(){
     const startaddress = document.getElementById("startInput").value.trim();
     const endaddress = document.getElementById("endInput").value.trim();
 
-    // On small screens, switch to map-only view when user starts pathfinding
-    if (window.innerWidth <= 768) {
-        document.body.classList.add("mobile-map-only");
-    }
-
     if (!startaddress || !endaddress){
         showToast("Please enter both start and end addresses.", true);
         return;
+    }
+
+    // On small screens, switch to map-only view once a valid request starts.
+    if (window.innerWidth <= 768) {
+        document.body.classList.add("mobile-map-only");
     }
     setLoading(true);
 

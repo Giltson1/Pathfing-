@@ -21,7 +21,7 @@
   body {
     font-family: 'Syne', sans-serif;
     background: var(--bg);
-    color: black;
+    color: var(--text);
     height: 100vh;
     display: flex;
     flex-direction: column;
@@ -436,11 +436,10 @@
 /* graph.js toggles this body class during a mobile search to prioritize the map;
    it removes the class again when the search succeeds or the toast expires. */
 .mobile-map-only header,
-.mobile-map-only .sidebar,
-.mobile-map-only .toast {
+.mobile-map-only .sidebar {
   display: none !important;
 }
-.mobile-map-only body {
+.mobile-map-only {
   overflow: hidden;
 }
 .mobile-map-only .layout {
