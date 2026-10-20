@@ -55,3 +55,7 @@ python app.py 8080
 - The application downloads road data from the OpenStreetMap map API. Requests are limited to small areas.
 - The Flask backend builds a graph from the road data and streams each visited node to the browser.
 - The frontend uses Leaflet to draw the search progress and the resulting route.
+  
+## Testing
+
+As of now I've only tested routes within a 10 mile radius. Anything past that may be slow, since a bigger area means more roads to download and more nodes to draw.
