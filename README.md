@@ -59,3 +59,7 @@ python app.py 8080
 ## Testing
 
 As of now I've only tested routes within a 10 mile radius. Anything past that may be slow, since a bigger area means more roads to download and more nodes to draw.
+
+## Work in progress 
+-Mobile version
+-Stop button when you quick run
